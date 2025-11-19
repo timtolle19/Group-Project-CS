@@ -1,51 +1,163 @@
 import streamlit as st
 import sqlite3
 import hashlib
-import re  # used for password strength checks
-import pandas as pd  # used for the demo chart on the progress page
+import re  # password + email checks
+import pandas as pd  # demo chart on Progress page
+import base64  # for background image + logo
+
+import workout_planner  # teammates' workout builder
+import workout_calendar  # teammates' calendar
+import calorie_tracker   # ML-based calorie & protein tracker
+
 
 # ---------- basic page setup ----------
 st.set_page_config(
-    page_title="Uni Gym Personal Trainer",
+    page_title="UniFit Coach",
     page_icon="💪",
     layout="wide",
 )
 
-# ---------- custom CSS for green + glass look ----------
+# ---------- colors ----------
+PRIMARY_GREEN = "#007A3D"  # approx. HSG green
+
+
+# ---------- helper: load image as base64 for login background ----------
+def get_base64_of_image(path: str) -> str:
+    """Read a local image file and return it as base64 string."""
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+
+def load_logo(path: str) -> str:
+    """Load logo and return as base64 string for embedding in HTML."""
+    try:
+        with open(path, "rb") as img:
+            return base64.b64encode(img.read()).decode()
+    except FileNotFoundError:
+        return ""
+
+
+# image + logo files must exist in the same folder as app.py
+BACKGROUND_IMAGE = get_base64_of_image("background_pitch.jpg")
+LOGO_IMAGE = load_logo("unifit_logo.png")
+
+
+# ---------- GLOBAL CSS (theme) ----------
 st.markdown(
-    """
+    f"""
     <style>
-    body {
-        background: radial-gradient(circle at top left, #123824 0, #020b08 45%, #010504 100%);
-    }
-
-    [data-testid="stSidebar"] {
-        background: rgba(5, 20, 12, 0.65);
-        backdrop-filter: blur(18px);
-        -webkit-backdrop-filter: blur(18px);
-        border-right: 1px solid rgba(255, 255, 255, 0.06);
-    }
-
-    .block-container {
+    /* main app container */
+    .block-container {{
         padding-top: 2rem;
         padding-bottom: 2rem;
         max-width: 1000px;
         margin: auto;
-    }
+    }}
 
-    [data-testid="stSidebar"] .stButton > button {
-        width: 100%;
+    /* white background + green text for header bar */
+    [data-testid="stHeader"] {{
+        background-color: #FFFFFF !important;
+        color: {PRIMARY_GREEN};
+        box-shadow: none !important;
+    }}
+
+    /* generic buttons in main area (Login, Save profile, etc.) */
+    .stButton > button {{
         border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(15, 40, 25, 0.7);
-        color: #ECF0F1;
+        background-color: {PRIMARY_GREEN};
+        color: #ffffff;
+        border: 1px solid {PRIMARY_GREEN};
         padding: 0.5rem 1rem;
-        margin-bottom: 0.25rem;
-    }
-    [data-testid="stSidebar"] .stButton > button:hover {
-        border-color: #1ABC9C;
-        background: rgba(22, 60, 36, 0.9);
-    }
+        font-weight: 600;
+    }}
+    .stButton > button:hover {{
+        background-color: #005c2d;
+        border-color: #005c2d;
+        color: #ffffff;
+    }}
+
+    /* sidebar background: light grey with subtle border */
+    [data-testid="stSidebar"] {{
+        background: #f5f7f6;
+        border-right: 1px solid rgba(0, 0, 0, 0.05);
+    }}
+
+    /* default text elements in green */
+    p, span, label, .stMarkdown, .stText, .stCaption {{
+        color: {PRIMARY_GREEN};
+    }}
+
+    /* headings in HSG green */
+    h1, h2, h3, h4 {{
+        color: {PRIMARY_GREEN};
+    }}
+
+    /* rounded cards (containers with border=True) */
+    div[data-testid="stVerticalBlock"] > div > div[style*="border-radius: 0.5rem"] {{
+        border-radius: 1rem !important;
+    }}
+
+    /* ---- number inputs (Age, Weight, Height) styled like pills ---- */
+    div[data-testid="stNumberInput"] input {{
+        background-color: #ffffff !important;
+        color: {PRIMARY_GREEN} !important;
+        border-radius: 999px !important;
+        border: 1px solid {PRIMARY_GREEN} !important;
+        padding: 0.25rem 0.75rem !important;
+    }}
+
+    div[data-testid="stNumberInput"] input:focus {{
+        outline: none !important;
+        border: 2px solid {PRIMARY_GREEN} !important;
+        box-shadow: 0 0 0 1px rgba(0, 122, 61, 0.25);
+        background-color: #ffffff !important;
+        color: {PRIMARY_GREEN} !important;
+    }}
+
+    div[data-testid="stNumberInput"] button {{
+        background-color: #ffffff !important;
+        color: {PRIMARY_GREEN} !important;
+        border-radius: 999px !important;
+        border: 1px solid {PRIMARY_GREEN} !important;
+    }}
+
+    div[data-testid="stNumberInput"] button:hover {{
+        background-color: {PRIMARY_GREEN} !important;
+        color: #ffffff !important;
+        border-color: {PRIMARY_GREEN} !important;
+    }}
+
+    /* ---- text & password inputs (login / register / reset) ---- */
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stPasswordInput"] input {{
+        background-color: #ffffff !important;
+        color: {PRIMARY_GREEN} !important;
+        border-radius: 999px !important;
+        border: 1px solid {PRIMARY_GREEN} !important;
+        padding: 0.4rem 0.75rem !important;
+    }}
+
+    div[data-testid="stTextInput"] input::placeholder,
+    div[data-testid="stPasswordInput"] input::placeholder {{
+        color: rgba(0, 122, 61, 0.6) !important;
+    }}
+
+    div[data-testid="stTextInput"] input:focus,
+    div[data-testid="stPasswordInput"] input:focus {{
+        outline: none !important;
+        border: 2px solid {PRIMARY_GREEN} !important;
+        box-shadow: 0 0 0 1px rgba(0, 122, 61, 0.25);
+        background-color: #ffffff !important;
+        color: {PRIMARY_GREEN} !important;
+    }}
+
+    /* code blocks – white background instead of black */
+    div[data-testid="stCodeBlock"] pre,
+    div[data-testid="stCodeBlock"] {{
+        background-color: #FFFFFF !important;
+        color: {PRIMARY_GREEN} !important;
+        border-radius: 0.75rem !important;
+    }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -63,10 +175,12 @@ def get_db():
 
 
 def create_tables():
-    """Create tables for users and profiles if they do not exist."""
+    """Create tables for users and profiles if they do not exist
+    and ensure new columns are present."""
     conn = get_db()
     cur = conn.cursor()
 
+    # users table
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -77,6 +191,7 @@ def create_tables():
         """
     )
 
+    # profiles table (extended)
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS profiles (
@@ -84,10 +199,22 @@ def create_tables():
             age INTEGER,
             weight REAL,
             height REAL,
+            username TEXT,
+            allergies TEXT,
+            training_type TEXT,
+            diet_preferences TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         """
     )
+
+    # If DB was created earlier without new columns, try to add them
+    for col in ["username", "allergies", "training_type", "diet_preferences"]:
+        try:
+            cur.execute(f"ALTER TABLE profiles ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            # column already exists -> ignore
+            pass
 
     conn.commit()
     conn.close()
@@ -118,7 +245,10 @@ def validate_password_strength(password: str):
     if not re.search(r"[0-9]", password):
         return False, "Password must contain at least one digit."
     if not re.search(r"[^A-Za-z0-9]", password):
-        return False, "Password must contain at least one special character (e.g. !, ?, #, ...)."
+        return False, (
+            "Password must contain at least one special character "
+            "(e.g. !, ?, #, ...)."
+        )
     return True, ""
 
 
@@ -133,7 +263,7 @@ def is_valid_email(email: str) -> bool:
 # =========================================================
 
 def register_user(email: str, password: str):
-    """Create a new user and an empty profile."""
+    """Create a new user and an empty profile. Return (ok, msg, user_id)."""
     conn = get_db()
     cur = conn.cursor()
 
@@ -146,16 +276,21 @@ def register_user(email: str, password: str):
 
         # create empty profile row for the new user
         cur.execute(
-            "INSERT INTO profiles (user_id, age, weight, height) VALUES (?, ?, ?, ?)",
-            (user_id, None, None, None),
+            """
+            INSERT INTO profiles (
+                user_id, age, weight, height,
+                username, allergies, training_type, diet_preferences
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, None, None, None, None, None, None, None),
         )
 
         conn.commit()
         conn.close()
-        return True, "Account created. You can now log in."
+        return True, "Account created.", user_id
     except sqlite3.IntegrityError:
         conn.close()
-        return False, "An account with this email already exists."
+        return False, "An account with this email already exists.", None
 
 
 def verify_user(email: str, password: str):
@@ -179,28 +314,78 @@ def verify_user(email: str, password: str):
     return None
 
 
+def reset_password(email: str, new_password: str):
+    """Reset password for a given email (demo version: no email verification)."""
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id FROM users WHERE email = ?", (email,))
+    row = cur.fetchone()
+    if row is None:
+        conn.close()
+        return False, "No account found with this email."
+
+    cur.execute(
+        "UPDATE users SET password_hash = ? WHERE email = ?",
+        (hash_password(new_password), email),
+    )
+    conn.commit()
+    conn.close()
+    return True, "Password updated successfully."
+
+
 # =========================================================
 # PROFILE DB ACCESS
 # =========================================================
 
 def get_profile(user_id: int):
-    """Fetch age, weight, height for a given user_id."""
+    """Fetch profile info for a given user_id."""
     conn = get_db()
     cur = conn.cursor()
 
     cur.execute(
-        "SELECT age, weight, height FROM profiles WHERE user_id = ?",
+        """
+        SELECT age, weight, height,
+               username, allergies, training_type, diet_preferences
+        FROM profiles WHERE user_id = ?
+        """,
         (user_id,),
     )
     row = cur.fetchone()
     conn.close()
 
     if row:
-        return {"age": row[0], "weight": row[1], "height": row[2]}
-    return {"age": None, "weight": None, "height": None}
+        return {
+            "age": row[0],
+            "weight": row[1],
+            "height": row[2],
+            "username": row[3],
+            "allergies": row[4],
+            "training_type": row[5],
+            "diet_preferences": row[6],
+        }
+
+    return {
+        "age": None,
+        "weight": None,
+        "height": None,
+        "username": None,
+        "allergies": None,
+        "training_type": None,
+        "diet_preferences": None,
+    }
 
 
-def update_profile(user_id: int, age: int, weight: float, height: float):
+def update_profile(
+    user_id: int,
+    age: int,
+    weight: float,
+    height: float,
+    username: str,
+    allergies: str,
+    training_type: str,
+    diet_preferences: str,
+):
     """Update profile values for a given user_id."""
     conn = get_db()
     cur = conn.cursor()
@@ -208,17 +393,28 @@ def update_profile(user_id: int, age: int, weight: float, height: float):
     cur.execute(
         """
         UPDATE profiles
-        SET age = ?, weight = ?, height = ?
+        SET age = ?, weight = ?, height = ?,
+            username = ?, allergies = ?,
+            training_type = ?, diet_preferences = ?
         WHERE user_id = ?
         """,
-        (age, weight, height, user_id),
+        (
+            age,
+            weight,
+            height,
+            username,
+            allergies,
+            training_type,
+            diet_preferences,
+            user_id,
+        ),
     )
     conn.commit()
     conn.close()
 
 
 # =========================================================
-# AUTHENTICATION UI (LOGIN / REGISTER)
+# AUTHENTICATION UI (LOGIN / REGISTER / RESET)
 # =========================================================
 
 def show_login_page():
@@ -227,7 +423,7 @@ def show_login_page():
 
     with col_center:
         st.title("Login")
-        st.caption("Access your personal training dashboard.")
+        st.caption("Log in to your UniFit Coach dashboard.")
 
         with st.container(border=True):
             email = st.text_input("Email")
@@ -242,6 +438,7 @@ def show_login_page():
                         st.session_state.logged_in = True
                         st.session_state.user_id = user_id
                         st.session_state.user_email = email
+                        st.session_state.current_page = "Profile"
                         st.rerun()
                     else:
                         st.error("Invalid email or password.")
@@ -252,6 +449,11 @@ def show_login_page():
             st.session_state.login_mode = "register"
             st.rerun()
 
+        st.write("")
+        if st.button("Forgot password?", use_container_width=True):
+            st.session_state.login_mode = "reset"
+            st.rerun()
+
 
 def show_register_page():
     """Registration screen styled with centered card and password rules."""
@@ -259,7 +461,7 @@ def show_register_page():
 
     with col_center:
         st.title("Register")
-        st.caption("Create an account for the Uni Gym personal trainer.")
+        st.caption("Create an account for UniFit Coach.")
 
         with st.container(border=True):
             email = st.text_input("Email")
@@ -287,10 +489,56 @@ def show_register_page():
                     if not ok_pw:
                         st.error(msg_pw)
                     else:
-                        ok, msg = register_user(email, password)
+                        ok, msg, user_id = register_user(email, password)
+                        if ok:
+                            st.session_state.logged_in = True
+                            st.session_state.user_id = user_id
+                            st.session_state.user_email = email
+                            st.session_state.current_page = "Profile"
+                            st.success("Account created! Let's set up your profile.")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+        st.write("---")
+        if st.button("Back to login", use_container_width=True):
+            st.session_state.login_mode = "login"
+            st.rerun()
+
+
+def show_reset_password_page():
+    """Simple password reset: enter email + new password (demo, no email verification)."""
+    col_left, col_center, col_right = st.columns([1, 2, 1])
+
+    with col_center:
+        st.title("Reset password")
+        st.caption(
+            "For demo purposes, you can reset your password by entering your email "
+            "and a new password."
+        )
+
+        with st.container(border=True):
+            email = st.text_input("Email")
+            new_pw = st.text_input("New password", type="password")
+            confirm_pw = st.text_input("Confirm new password", type="password")
+
+            if st.button("Reset password", use_container_width=True):
+                if not email or not new_pw or not confirm_pw:
+                    st.error("Please fill out all fields.")
+                elif new_pw != confirm_pw:
+                    st.error("Passwords do not match.")
+                elif not is_valid_email(email):
+                    st.error("Please enter a valid email address.")
+                else:
+                    ok_pw, msg_pw = validate_password_strength(new_pw)
+                    if not ok_pw:
+                        st.error(msg_pw)
+                    else:
+                        ok, msg = reset_password(email, new_pw)
                         if ok:
                             st.success(msg)
                             st.session_state.login_mode = "login"
+                            st.rerun()
                         else:
                             st.error(msg)
 
@@ -301,7 +549,53 @@ def show_register_page():
 
 
 # =========================================================
-# APP PAGES (Profile / Trainer / Calorie tracker / Progress)
+# PUMPFESSOR JOE – SIMPLE IN-APP GUIDE
+# =========================================================
+
+def show_pumpfessor_joe(page_name: str):
+    """Small helper box with tips depending on the current page."""
+    with st.expander("👨‍🏫 Pumpfessor Joe – Need a quick guide?", expanded=False):
+        if page_name == "Profile":
+            st.write(
+                "Welcome to your **Profile**! 🧍‍♂️\n\n"
+                "- Enter your age, weight, height, preferences and allergies.\n"
+                "- Click **Save profile**.\n"
+                "- This data can be used to personalize your workouts "
+                "and nutrition advice."
+            )
+        elif page_name == "Trainer":
+            st.write(
+                "This is the **Trainer** page. 🏋️‍♂️\n\n"
+                "Use the tabs to build a workout with Pumpfessor Joe and "
+                "see your long-term training schedule."
+            )
+        elif page_name == "Calorie tracker":
+            st.write(
+                "On the **Calorie tracker** page 🔥 you can:\n"
+                "- Enter your body data and training session.\n"
+                "- Let Pumpfessor Joe estimate your daily calorie target.\n"
+                "- Log your meals and track calories & protein with donut charts."
+            )
+        elif page_name == "Nutrition adviser":
+            st.write(
+                "The **Nutrition adviser** page 🥗 will later give you suggestions on "
+                "meals or macros based on your goals and allergies."
+            )
+        elif page_name == "Progress":
+            st.write(
+                "The **Progress** page 📈 shows how you're doing over time.\n\n"
+                "Right now you see a demo chart. In the future, this can be replaced "
+                "with real workout or calorie data."
+            )
+        else:
+            st.write(
+                "Pumpfessor Joe is here to help you navigate UniFit Coach. "
+                "Use the menu on the left to switch between pages."
+            )
+
+
+# =========================================================
+# APP PAGES
 # =========================================================
 
 def show_profile_page():
@@ -310,7 +604,7 @@ def show_profile_page():
     profile = get_profile(user_id)
 
     st.header("Profile")
-    st.write("Basic information that can be used by the trainer logic later.")
+    st.write("Basic information that can be used by the trainer and nutrition logic later.")
     st.divider()
 
     col_left, col_center, col_right = st.columns([1, 2, 1])
@@ -338,6 +632,12 @@ def show_profile_page():
                     step=0.5,
                 )
 
+                username = st.text_input(
+                    "Username",
+                    value=profile["username"] or "",
+                    max_chars=30,
+                )
+
             with c2:
                 weight = st.number_input(
                     "Weight (kg)",
@@ -347,8 +647,57 @@ def show_profile_page():
                     step=0.5,
                 )
 
+                training_options = [
+                    "Not set",
+                    "Strength",
+                    "Hypertrophy",
+                    "Endurance",
+                    "Mixed",
+                ]
+                current_training = profile["training_type"] or "Not set"
+                if current_training not in training_options:
+                    current_training = "Not set"
+                training_type = st.selectbox(
+                    "Preferred training style",
+                    training_options,
+                    index=training_options.index(current_training),
+                )
+
+                diet_options = [
+                    "Not set",
+                    "No preference",
+                    "High protein",
+                    "Vegetarian",
+                    "Vegan",
+                    "Low carb",
+                    "Mediterranean",
+                ]
+                current_diet = profile["diet_preferences"] or "Not set"
+                if current_diet not in diet_options:
+                    current_diet = "Not set"
+                diet_preferences = st.selectbox(
+                    "Diet preference",
+                    diet_options,
+                    index=diet_options.index(current_diet),
+                )
+
+            allergies = st.text_area(
+                "Allergies (optional)",
+                value=profile["allergies"] or "",
+                help="For example: peanuts, lactose, gluten …",
+            )
+
             if st.button("Save profile", use_container_width=True):
-                update_profile(user_id, int(age), float(weight), float(height))
+                update_profile(
+                    user_id,
+                    int(age),
+                    float(weight),
+                    float(height),
+                    username.strip() or None,
+                    allergies.strip() or None,
+                    training_type,
+                    diet_preferences,
+                )
                 st.success("Profile saved.")
 
         st.divider()
@@ -358,23 +707,51 @@ def show_profile_page():
         profile = get_profile(user_id)
 
         age_display = profile["age"] if profile["age"] not in (None, 0) else "Not set"
-        weight_display = profile["weight"] if profile["weight"] not in (None, 0.0) else "Not set"
-        height_display = profile["height"] if profile["height"] not in (None, 0.0) else "Not set"
+        weight_display = (
+            profile["weight"] if profile["weight"] not in (None, 0.0) else "Not set"
+        )
+        height_display = (
+            profile["height"] if profile["height"] not in (None, 0.0) else "Not set"
+        )
+        username_display = profile["username"] or "Not set"
+        training_display = profile["training_type"] or "Not set"
+        diet_display = profile["diet_preferences"] or "Not set"
+        allergies_display = profile["allergies"] or "None noted"
 
-        if age_display == weight_display == height_display == "Not set":
+        if (
+            age_display == "Not set"
+            and weight_display == "Not set"
+            and height_display == "Not set"
+            and username_display == "Not set"
+            and training_display == "Not set"
+            and diet_display == "Not set"
+            and allergies_display == "None noted"
+        ):
             st.info("No profile data saved yet.")
         else:
+            st.write(f"**Username:** {username_display}")
             st.write(f"**Age:** {age_display} years")
             st.write(f"**Weight:** {weight_display} kg")
             st.write(f"**Height:** {height_display} cm")
+            st.write(f"**Training style:** {training_display}")
+            st.write(f"**Diet preference:** {diet_display}")
+            st.write(f"**Allergies:** {allergies_display}")
 
         # --- Profile completeness indicator ---
+        fields_for_completeness = [
+            profile["username"],
+            profile["age"],
+            profile["weight"],
+            profile["height"],
+            profile["training_type"],
+            profile["diet_preferences"],
+        ]
         filled_fields = sum(
             1
-            for value in [profile["age"], profile["weight"], profile["height"]]
-            if value not in (None, 0, 0.0)
+            for v in fields_for_completeness
+            if v not in (None, 0, 0.0, "", "Not set")
         )
-        completeness = filled_fields / 3
+        completeness = filled_fields / len(fields_for_completeness)
 
         st.write("")
         st.write("Profile completeness:")
@@ -382,48 +759,54 @@ def show_profile_page():
 
 
 def show_trainer_page():
-    """Placeholder page for future trainer logic."""
+    """Trainer page: integrates Pumpfessor Joe workout builder + calendar."""
     st.header("Trainer")
-
-    user_id = st.session_state.user_id
-    profile = get_profile(user_id)  # your teammates can use this
+    st.write("Build your personalized workout and see your training calendar with Pumpfessor Joe 🧠💪")
+    st.divider()
 
     col_left, col_center, col_right = st.columns([1, 2, 1])
     with col_center:
         with st.container(border=True):
-            st.subheader("Personal training plan (coming soon)")
-            st.write(
-                "Here, the trainer module can use the logged-in user's profile "
-                "to generate a personalized workout plan."
-            )
+            tabs = st.tabs(["Workout builder", "Training calendar"])
 
-            st.code(
-                "Example:\n"
-                "plan = generate_workout_plan(profile)\n"
-                "st.write(plan)",
-                language="python",
-            )
+            with tabs[0]:
+                workout_planner.main()
 
-            st.info("This area is reserved for the trainer logic.")
+            with tabs[1]:
+                workout_calendar.main()
 
 
 def show_calorie_tracker_page():
-    """Placeholder page for future calorie tracker logic."""
+    """Calorie tracker page: integrates ML-based nutrition planner."""
     st.header("Calorie tracker")
+    st.divider()
+
+    col_left, col_center, col_right = st.columns([1, 2, 1])
+    with col_center:
+        with st.container(border=True):
+            calorie_tracker.main()
+
+
+def show_nutrition_page():
+    """Placeholder page for future nutrition adviser logic."""
+    st.header("Nutrition adviser")
+    st.divider()
 
     col_left, col_center, col_right = st.columns([1, 2, 1])
     with col_center:
         with st.container(border=True):
             st.subheader("Coming soon")
             st.write(
-                "This page will later be used to track calories burned and possibly calories eaten."
+                "This page will later provide nutrition advice based on your goals, "
+                "diet preferences and allergies."
             )
-            st.info("Calorie tracking logic will be implemented by your teammates.")
+            st.info("Nutrition adviser logic will be implemented by your teammates.")
 
 
 def show_progress_page():
     """Simple placeholder progress page with a demo chart."""
     st.header("Progress")
+    st.divider()
 
     col_left, col_center, col_right = st.columns([1, 2, 1])
     with col_center:
@@ -435,7 +818,6 @@ def show_progress_page():
                 "Later, your team can replace it with real workout or calorie data."
             )
 
-            # example data: completed workouts per week
             data = {
                 "Week": ["Week 1", "Week 2", "Week 3", "Week 4"],
                 "Workouts": [2, 3, 4, 3],
@@ -462,20 +844,71 @@ def main():
     if "current_page" not in st.session_state:
         st.session_state.current_page = "Profile"
 
-    # if not logged in, show auth pages only
+    # if not logged in, show auth pages only (with background image)
     if not st.session_state.logged_in:
-        st.title("Uni Gym Personal Trainer")
-        st.caption("Train smarter. Track better. Stay consistent. 🌿")
+        # background image on login / register / reset page
+        st.markdown(
+            f"""
+            <style>
+            [data-testid="stAppViewContainer"] {{
+                background-image: url("data:image/jpg;base64,{BACKGROUND_IMAGE}");
+                background-size: cover;
+                background-position: center;
+                background-repeat: no-repeat;
+            }}
+
+            .block-container {{
+                background-color: rgba(255, 255, 255, 0.75);
+                border-radius: 1rem;
+                padding-top: 2rem;
+                padding-bottom: 2rem;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.title("UniFit Coach")
+        st.caption("Train smarter. Eat better. Stay consistent. 🌿")
         st.divider()
 
-        if st.session_state.login_mode == "login":
+        mode = st.session_state.login_mode
+        if mode == "login":
             show_login_page()
-        else:
+        elif mode == "register":
             show_register_page()
+        elif mode == "reset":
+            show_reset_password_page()
         return
 
-    # when logged in: sidebar navigation
-    st.sidebar.title("Menu")
+    # when logged in: remove background image -> plain white
+    st.markdown(
+        """
+        <style>
+        [data-testid="stAppViewContainer"] {
+            background-image: none !important;
+            background-color: #ffffff !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # --------------- SIDEBAR (logo + navigation) ---------------
+    if LOGO_IMAGE:
+        st.sidebar.markdown(
+            f"""
+            <div style="text-align: left; padding-top: 1rem; padding-bottom: 1rem;">
+                <img src="data:image/png;base64,{LOGO_IMAGE}"
+                     style="width: 170px; margin-bottom: 0.5rem;">
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.sidebar.markdown("### UniFit Coach")
+
+    st.sidebar.caption("Menu")
 
     # show logged-in email in the sidebar
     if "user_email" in st.session_state and st.session_state.user_email:
@@ -488,6 +921,8 @@ def main():
         st.session_state.current_page = "Trainer"
     if st.sidebar.button("🔥  Calorie tracker"):
         st.session_state.current_page = "Calorie tracker"
+    if st.sidebar.button("🥗  Nutrition adviser"):
+        st.session_state.current_page = "Nutrition adviser"
     if st.sidebar.button("📈  Progress"):
         st.session_state.current_page = "Progress"
 
@@ -496,26 +931,73 @@ def main():
         st.session_state.logged_in = False
         st.session_state.user_id = None
         st.session_state.user_email = None
+        st.session_state.login_mode = "login"
         st.rerun()
 
-    # main header visible when logged in
-    st.title("Uni Gym Personal Trainer")
-    st.caption("Train smarter. Track better. Stay consistent. 🌿")
+    # --------------- MAIN LAYOUT (same structure for all pages) ---------------
+    st.title("UniFit Coach")
+    st.caption("Train smarter. Eat better. Stay consistent. 🌿")
     if "user_email" in st.session_state and st.session_state.user_email:
         st.write(f"Welcome back, **{st.session_state.user_email}** 👋")
     st.divider()
 
     page = st.session_state.current_page
+
+    # Pumpfessor Joe helper for the current page
+    show_pumpfessor_joe(page)
+
+    # then show the main content
     if page == "Profile":
         show_profile_page()
     elif page == "Trainer":
         show_trainer_page()
     elif page == "Calorie tracker":
         show_calorie_tracker_page()
+    elif page == "Nutrition adviser":
+        show_nutrition_page()
     elif page == "Progress":
         show_progress_page()
 
 
+# ---- FINAL CSS OVERRIDES (ensure buttons + sidebar look correct) ----
+st.markdown(
+    f"""
+    <style>
+    /* All action buttons (Login, Save profile, etc.) -> white text */
+    div.stButton > button,
+    div.stButton > button * {{
+        color: #ffffff !important;
+        font-weight: 600 !important;
+    }}
+
+    /* Sidebar buttons: white by default, green text + border */
+    section[data-testid="stSidebar"] div.stButton > button {{
+        width: 100% !important;
+        background-color: #ffffff !important;
+        color: {PRIMARY_GREEN} !important;
+        border: 1px solid {PRIMARY_GREEN} !important;
+    }}
+    section[data-testid="stSidebar"] div.stButton > button * {{
+        color: {PRIMARY_GREEN} !important;
+    }}
+
+    /* Sidebar buttons on hover/press: green background, white text */
+    section[data-testid="stSidebar"] div.stButton > button:hover,
+    section[data-testid="stSidebar"] div.stButton > button:active,
+    section[data-testid="stSidebar"] div.stButton > button:focus {{
+        background-color: {PRIMARY_GREEN} !important;
+        color: #ffffff !important;
+    }}
+    section[data-testid="stSidebar"] div.stButton > button:hover *,
+    section[data-testid="stSidebar"] div.stButton > button:active *,
+    section[data-testid="stSidebar"] div.stButton > button:focus * {{
+        color: #ffffff !important;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
 if __name__ == "__main__":
     main()
-
