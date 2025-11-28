@@ -1,6 +1,5 @@
 import math
 import json
-
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -8,22 +7,13 @@ import matplotlib.pyplot as plt
 
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
+from database import get_profile
 
 PRIMARY_COLOR = "#007A3D"
-
-# ------------------------------------------------------------
-#   CSV SOURCE
-#   1. Try local "calories.csv"
-#   2. If missing, fall back to GitHub URL
-# ------------------------------------------------------------
 CSV_URL = "https://raw.githubusercontent.com/philippdmt/Protein_and_Calories/refs/heads/main/calories.csv"
 
 
-# -----------------------------
-# DATA + MODEL LOADING
-# -----------------------------
 def determine_training_type(heart_rate, age):
-    """Bestimme Trainingstyp anhand Herzfrequenz und Alter."""
     if heart_rate >= 0.6 * (220 - age):
         return "Cardio"
     else:
@@ -32,64 +22,39 @@ def determine_training_type(heart_rate, age):
 
 @st.cache_data
 def load_and_train_model():
-    """
-    Läd den Datensatz, trainiert ein Lineares Regressionsmodell
-    und gibt (modell, feature_spalten_liste) zurück.
-
-    Versucht zuerst 'calories.csv' lokal, fällt sonst auf CSV_URL zurück.
-    """
     try:
-        # 1) Versuch: lokale Datei
         calories = pd.read_csv("calories.csv")
     except FileNotFoundError:
-        # 2) Fallback: GitHub-URL
         calories = pd.read_csv(CSV_URL)
 
-    # Training_Type ableiten
     calories["Training_Type"] = calories.apply(
         lambda row: determine_training_type(row["Heart_Rate"], row["Age"]), axis=1
     )
 
-    # Zielvariable
     y = calories["Calories"]
-
-    # Features (ohne User_ID, Heart_Rate, Body_Temp, Calories)
     features = calories.drop(columns=["User_ID", "Heart_Rate", "Body_Temp", "Calories"])
-
-    # One-hot Encoding
     X = pd.get_dummies(features, columns=["Gender", "Training_Type"], drop_first=False)
 
-    # Train/Test Split
     X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
-
     model = LinearRegression()
     model.fit(X_train, y_train)
 
     return model, X.columns.tolist()
 
 
-# -----------------------------
-# BMR CALCULATION
-# -----------------------------
 def grundumsatz(age, weight, height, gender):
-    """Mifflin–St Jeor BMR equation."""
     if gender.lower() == "male":
         return 10 * weight + 6.25 * height - 5 * age + 5
     else:
         return 10 * weight + 6.25 * height - 5 * age - 161
 
 
-# -----------------------------
-# DONUT CHART
-# -----------------------------
 def donut_chart(consumed, total, title, unit):
     if total <= 0:
         total = 1
 
     consumed = max(0, consumed)
     remaining = max(total - consumed, 0)
-
-    # Farbe: grün normal, rot wenn Ziel überschritten
     color = "#007A3D" if consumed <= total else "#FF0000"
 
     fig, ax = plt.subplots(figsize=(3, 3), facecolor="white")
@@ -102,82 +67,76 @@ def donut_chart(consumed, total, title, unit):
     )
     ax.set(aspect="equal")
     ax.set_title(title)
-
-    ax.text(
-        0,
-        0,
-        f"{int(consumed)} / {int(total)} {unit}",
-        ha="center",
-        va="center",
-        fontsize=10,
-    )
-
+    ax.text(0, 0, f"{int(consumed)} / {int(total)} {unit}", ha="center", va="center", fontsize=10)
     st.pyplot(fig)
 
 
-# -----------------------------
-# MAIN (EMBEDDED INTO APP.PY)
-# -----------------------------
 def main():
-    # Kein st.set_page_config hier – das macht app.py schon!
-
-    # In app.py steht bereits:
-    # st.header("Calorie tracker"), st.divider(), Container, etc.
-    # Hier also "eine Ebene tiefer" bleiben:
     st.subheader("Pumpfessor Joe – Nutrition Planner")
-    st.write(
-        "Automatic calculation of calories and protein based on training and body data."
-    )
+    st.write("Automatic calculation of calories and protein based on training and body data.")
 
-    # Load ML model
+    # -------------------------
+    # MODEL LOAD
+    # -------------------------
     try:
         model, feature_columns = load_and_train_model()
     except Exception as e:
-        st.error("Error while loading the dataset / model. Check the CSV source.")
+        st.error("Error while loading dataset/model.")
         st.exception(e)
         return
 
-    # Initialize session state
-    if "meals" not in st.session_state:
-        st.session_state.meals = []
+    # -------------------------
+    # USER DATA
+    # -------------------------
+    if "logged_in" not in st.session_state or not st.session_state.logged_in:
+        st.error("Please log in first.")
+        return
 
-    # -----------------------------
-    # USER INPUT
-    # -----------------------------
-    st.markdown("### Personal & workout information")
-    col1, col2 = st.columns(2)
-    with col1:
-        gender = st.selectbox("Gender", ["Male", "Female"])
-        age = st.number_input("Age", 0, 100, 25)
-        height = st.number_input("Height (cm)", 120, 230, 180)
-        weight = st.number_input("Weight (kg)", 35, 200, 75)
+    user_id = st.session_state.user_id
+    user = get_profile(user_id)
+    if not user:
+        st.error("Could not load user profile.")
+        return
 
-    with col2:
-        goal = st.selectbox("Goal", ["Cut", "Maintain", "Bulk"])
-        training_type = st.selectbox("Training type", ["Cardio", "Kraft"])
-        duration = st.number_input("Training duration (min)", 10, 240, 60)
+    age = user["age"]
+    weight = user["weight"]
+    height = user["height"]
+    gender = user.get("gender", "male")
+    goal = user.get("goal", "Maintain")
 
-    # -----------------------------
+    # -------------------------
+    # TRAININGSKALORIEN BERECHNEN
+    # -------------------------
+    training_kcal = 0
+    if "current_workout" in st.session_state:
+        current_workout = st.session_state["current_workout"]
+        duration = current_workout["minutes"]
+        title = current_workout["title"]
+
+        strength_workouts = ["Push Day", "Pull Day", "Leg Day", "Full Body", "Upper Body", "Lower Body"]
+        training_type_simple = "Kraft" if title in strength_workouts else "Cardio"
+
+        # Trainingskalorien berechnen
+        person = {
+            "Age": age,
+            "Duration": duration,
+            "Weight": weight,
+            "Height": height,
+            "Gender_Female": 1 if gender.lower() == "female" else 0,
+            "Gender_Male": 1 if gender.lower() == "male" else 0,
+            "Training_Type_Cardio": 1 if training_type_simple == "Cardio" else 0,
+            "Training_Type_Kraft": 1 if training_type_simple == "Kraft" else 0,
+        }
+
+        person_df = pd.DataFrame([person])
+        person_df = person_df.reindex(columns=feature_columns, fill_value=0)
+        training_kcal = float(model.predict(person_df)[0])
+
+    # -------------------------
     # CALCULATIONS
-    # -----------------------------
-    person = {
-        "Age": age,
-        "Duration": duration,
-        "Weight": weight,
-        "Height": height,
-        "Gender_Female": 1 if gender.lower() == "female" else 0,
-        "Gender_Male": 1 if gender.lower() == "male" else 0,
-        "Training_Type_Cardio": 1 if training_type.lower() == "cardio" else 0,
-        "Training_Type_Kraft": 1 if training_type.lower() == "kraft" else 0,
-    }
-
-    person_df = pd.DataFrame([person])
-    person_df = person_df.reindex(columns=feature_columns, fill_value=0)
-
-    training_kcal = float(model.predict(person_df)[0])
+    # -------------------------
     bmr = grundumsatz(age, weight, height, gender)
 
-    # Goal adjustments
     if goal.lower() == "bulk":
         target_calories = bmr + training_kcal + 300
         protein_per_kg = 2.0
@@ -191,9 +150,29 @@ def main():
     target_calories = max(target_calories, 1200)
     target_protein = protein_per_kg * weight
 
-    # -----------------------------
+    # -------------------------
     # MEAL LOGGING
-    # -----------------------------
+    # -------------------------
+    if "meals" not in st.session_state:
+        st.session_state.meals = []
+
+    # Berechnung für Charts
+    total_cal = sum(m["calories"] for m in st.session_state.meals)
+    total_prot = sum(m["protein"] for m in st.session_state.meals)
+
+    # -------------------------
+    # DAILY TARGET CHARTS
+    # -------------------------
+    st.markdown("### Daily targets")
+    c1, c2 = st.columns(2)
+    with c1:
+        donut_chart(total_cal, target_calories, "Calories", "kcal")
+    with c2:
+        donut_chart(total_prot, target_protein, "Protein", "g")
+
+    # -------------------------
+    # LOG MEALS
+    # -------------------------
     st.markdown("### Log meals")
     with st.form("meal_form"):
         m1, m2, m3 = st.columns([2, 1, 1])
@@ -204,39 +183,22 @@ def main():
 
     if submitted:
         st.session_state.meals.append(
-            {
-                "meal": meal_name,
-                "calories": float(meal_cal),
-                "protein": float(meal_prot),
-            }
+            {"meal": meal_name, "calories": float(meal_cal), "protein": float(meal_prot)}
         )
 
-    # Reset meals
     if st.button("Reset meals"):
         st.session_state.meals = []
 
-    # -----------------------------
-    # TOTALS
-    # -----------------------------
-    total_cal = sum(m["calories"] for m in st.session_state.meals)
-    total_prot = sum(m["protein"] for m in st.session_state.meals)
-
-    # -----------------------------
-    # DONUT CHARTS
-    # -----------------------------
-    st.markdown("### Daily targets")
-    c1, c2 = st.columns(2)
-    with c1:
-        donut_chart(total_cal, target_calories, "Calories", "kcal")
-    with c2:
-        donut_chart(total_prot, target_protein, "Protein", "g")
-
-    # -----------------------------
-    # MEAL TABLE
-    # -----------------------------
     if st.session_state.meals:
         st.markdown("### Logged meals")
-        st.table(pd.DataFrame(st.session_state.meals))
+        df_meals = pd.DataFrame(st.session_state.meals)
+        # Rundung auf ganze Zahlen
+        df_meals["calories"] = df_meals["calories"].round(0).astype(int)
+        df_meals["protein"] = df_meals["protein"].round(0).astype(int)
+        # Index bei 1 beginnen lassen
+        df_meals.index = range(1, len(df_meals) + 1)
+        st.table(df_meals)
+
 
 
 if __name__ == "__main__":
