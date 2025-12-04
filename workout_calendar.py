@@ -8,7 +8,7 @@ from streamlit import session_state as state
 
 PRIMARY_COLOR = "#007A3D"
 
-
+# Weekday names + index matching Python datetime.weekday()
 WEEKDAYS = [
     ("Monday", 0),
     ("Tuesday", 1),
@@ -19,7 +19,7 @@ WEEKDAYS = [
     ("Sunday", 6),
 ]
 
-
+# Workout categories selectable by user
 WORKOUT_TYPES = [
     "Push day",
     "Pull day",
@@ -31,68 +31,81 @@ WORKOUT_TYPES = [
 
 
 def _init_state():
-    """Ensure default values in session_state for the workout calendar."""
+    """
+    Ensure persistent variables exist inside Streamlit session_state.
+    This keeps data while user interacts with the app.
+    """
+
+    # Stores workout logs keyed by date string YYYY-MM-DD
+    # Example:
+    #  { "2025-12-02": {"minutes": 45, "type": "Push day"} }
     if "workout_logs" not in state:
-        # dict: { "YYYY-MM-DD": {"minutes": int, "type": str} }
         state.workout_logs = {}
 
+    # Stores currently selected calendar date
     if "selected_date" not in state:
         state.selected_date = datetime.date.today()
 
 
 def _render_month(year: int, month: int):
     """
-    Render a simple month grid for logging past workouts.
-
-    Each day is a button; clicking it sets `state.selected_date`.
-    If a workout log exists for that date, a small summary is shown.
+    Render an interactive month calendar.
+    Each date is clickable -> selecting a date to log/edit workouts.
+    Logged days show brief summary below button.
     """
-    cal = calendar.Calendar(firstweekday=0)  # Monday
 
+    # Create a calendar object starting week on Monday
+    cal = calendar.Calendar(firstweekday=0)
+
+    # Display month heading (e.g., "December 2025")
     month_name = calendar.month_name[month]
     st.markdown(f"#### {month_name} {year}")
 
-    # weekday header
+    # Display weekday header row
     header_cols = st.columns(7)
-    for col, (name, _idx) in zip(header_cols, WEEKDAYS):
+    for col, (name, _) in zip(header_cols, WEEKDAYS):
         col.markdown(
-            f"<div style='text-align:center; font-size:13px; color:#555; font-weight:600;'>{name[:2]}</div>",
+            f"<div style='text-align:center; font-size:13px; "
+            f"color:#555; font-weight:600;'>{name[:2]}</div>",
             unsafe_allow_html=True,
         )
 
-    # weeks
+    # Loop through weeks and dates in the month
     for week in cal.monthdatescalendar(year, month):
         cols = st.columns(7)
+
         for col, date_obj in zip(cols, week):
-            # Only show days belonging to this month
+            # Only display real days belonging to this month
             if date_obj.month != month:
                 with col:
-                    st.write("")  # empty cell
+                    st.write("")  # empty cell placeholder
                 continue
 
             date_str = date_obj.isoformat()
             log = state.workout_logs.get(date_str)
             is_selected = (state.selected_date == date_obj)
 
-            # Build label & simple style indicator
             day_label = str(date_obj.day)
 
             with col:
-                # Slight visual hint for selected date (just text around button)
+
+                # Show marker if this is the selected day
                 if is_selected:
                     st.markdown(
-                        f"<div style='text-align:center; font-size:11px; color:{PRIMARY_COLOR};'>Selected</div>",
+                        f"<div style='text-align:center; font-size:11px; "
+                        f"color:{PRIMARY_COLOR};'>Selected</div>",
                         unsafe_allow_html=True,
                     )
 
+                # Create interactive button for the date
                 if st.button(
                     day_label,
                     key=f"day-btn-{date_str}",
                     use_container_width=True,
                 ):
-                    state.selected_date = date_obj
+                    state.selected_date = date_obj  # update selected day
 
-                # Show a brief log summary under the button if exists
+                # If workout exists for this day, show a summary
                 if log:
                     minutes = log.get("minutes")
                     wtype = log.get("type")
@@ -101,8 +114,8 @@ def _render_month(year: int, month: int):
 
 
 def main():
-    """Render the workout log calendar tab (used by app.py)."""
-    _init_state()
+    """Main UI function to render the workout calendar tab."""
+    _init_state()  # ensure state variables exist
 
     st.subheader("Workout log calendar")
     st.caption(
@@ -116,33 +129,39 @@ def main():
 
     st.divider()
 
-    # ----- render the last 3 months (current month + previous 2) -----
+    # Determine the date index to count months backwards
     today = datetime.date.today()
-    base_index = today.year * 12 + (today.month - 1)  # e.g. 2025-12 -> 2025*12 + 11
+    base_index = today.year * 12 + (today.month - 1)
 
-    months_to_show = 3  # always 3 months into the past (including current month)
+    # Always show 3 months — current month + previous 2
+    months_to_show = 3
 
+    # Render the calendar for the last 3 months
     for offset in range(months_to_show):
         idx = base_index - offset
         year = idx // 12
         month = (idx % 12) + 1
+
         _render_month(year, month)
-        st.write("")  # spacing between months
+        st.write("")  # spacing between month sections
 
     st.divider()
 
-    # ----- detail panel for selected date -----
+    # ========= Workout logging panel ========= #
+
     selected_date: datetime.date = state.selected_date
     selected_str = selected_date.strftime("%A, %d %B %Y")
+
     st.markdown(f"### Log workout for {selected_str}")
 
     date_key = selected_date.isoformat()
-    existing_log = state.workout_logs.get(date_key, {})
 
-    # Pre-fill with existing values if available
+    # Load existing entry if exists; otherwise default values
+    existing_log = state.workout_logs.get(date_key, {})
     existing_minutes = existing_log.get("minutes", 0)
     existing_type = existing_log.get("type", WORKOUT_TYPES[0])
 
+    # Two columns — one input for minutes, one dropdown for workout type
     col_minutes, col_type = st.columns([1, 1])
 
     with col_minutes:
@@ -157,7 +176,7 @@ def main():
         )
 
     with col_type:
-        # ensure existing_type is in WORKOUT_TYPES
+        # Ensure saved type still exists in case the list changes
         if existing_type not in WORKOUT_TYPES:
             existing_type = WORKOUT_TYPES[0]
 
@@ -169,6 +188,7 @@ def main():
             key="workout_type_select",
         )
 
+    # Save workout data to state
     if st.button("Save workout", type="primary"):
         state.workout_logs[date_key] = {
             "minutes": int(minutes),
@@ -176,12 +196,14 @@ def main():
         }
         st.success(f"Saved workout for {selected_str}.")
 
-    # Optionally show the last few logged days as a quick summary
+    # Optional: Show most recent logged workouts below
     if state.workout_logs:
         st.markdown("#### Recent logged workouts")
-        # sort by date, descending
+
+        # Sort log entries by latest first
         items = sorted(state.workout_logs.items(), key=lambda x: x[0], reverse=True)
-        for d_str, log in items[:10]:
+
+        for d_str, log in items[:10]:  # show last 10 entries
             d_obj = datetime.date.fromisoformat(d_str)
             label = d_obj.strftime("%d %b %Y (%a)")
             st.write(f"- **{label}**: {log['minutes']} min – {log['type']}")
