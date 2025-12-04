@@ -370,10 +370,24 @@ def main():
         unsafe_allow_html=True,
     )
 
+    # 🔹 Custom CSS so selected sore muscles show white text in green pills
+    st.markdown(
+        f"""
+        <style>
+        .stMultiSelect [data-baseweb="tag"] {{
+            background-color: {PRIMARY_COLOR} !important;
+            color: white !important;
+        }}
+        .stMultiSelect [data-baseweb="tag"] span {{
+            color: white !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # Soreness now: ONLY select muscle groups, no intensity sliders
     sore_groups = st.multiselect("Select sore muscle groups:", muscles)
-
-    # Removed the "Additional wishes" section completely
 
     intensity = st.selectbox("Intensity:", ["Light", "Moderate", "Max effort"], 1)
 
