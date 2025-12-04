@@ -1,5 +1,3 @@
-# workout_planner.py  (or rename to trainer_module.py)
-
 import random
 import pandas as pd
 import streamlit as st
@@ -52,11 +50,12 @@ def load_exercises(csv_path: str):
 
 
 # ---------------------------------------------------
-# MUSCLE INFERENCE
+# MUSCLE INFERENCE (still used for exercise selection)
 # ---------------------------------------------------
 def infer_muscles_from_title(title, all_muscles):
     """
-    Infer which muscle groups to focus on from the workout title.
+    Infer which muscle groups to focus on from the workout title
+    (used for scoring exercises, not for soreness UI).
     """
     title = title.lower()
 
@@ -79,7 +78,6 @@ def infer_muscles_from_title(title, all_muscles):
     found = set()
     for key, muscles in mapping.items():
         if key in title:
-            # only keep muscles that actually exist in database
             found.update([m for m in muscles if m in all_muscles])
 
     if not found:
@@ -87,6 +85,45 @@ def infer_muscles_from_title(title, all_muscles):
         return all_muscles[:3]
 
     return list(found)
+
+
+# ---------------------------------------------------
+# SORENESS OPTIONS PER WORKOUT TYPE (NEW)
+# ---------------------------------------------------
+def get_soreness_options(title: str, all_muscles: list[str]) -> list[str]:
+    """
+    Return the list of muscle groups that should be available
+    as soreness options for the given workout type.
+    Only muscles that actually exist in the database (all_muscles) are kept.
+    """
+
+    # Define base groups
+    push_groups = ["Chest", "Shoulders", "Traps", "Triceps"]
+    pull_groups = ["Lats", "Upper Back", "Lower Back", "Forearms", "Biceps"]
+    leg_groups = ["Quads", "Hamstrings", "Calves", "Glutes", "Adductor"]
+    abs_groups = ["Abs"]
+
+    mapping = {
+        "push day": push_groups,
+        "pull day": pull_groups,
+        "leg day": leg_groups,
+        "upper body": push_groups + pull_groups,
+        "lower body": leg_groups,
+        "full body": push_groups + pull_groups + leg_groups + abs_groups,
+        "cardio": [],  # no soreness options for cardio
+    }
+
+    key = title.lower().strip()
+    base = mapping.get(key, [])
+
+    if not base:
+        return []
+
+    # Keep only muscles that exist in the database
+    all_set = set(all_muscles)
+    filtered = sorted({m for m in base if m in all_set})
+
+    return filtered
 
 
 # ---------------------------------------------------
@@ -186,7 +223,7 @@ def build_workout_plan(df, title, minutes, sore_muscles, intensity):
                 "link": row.get("Link", ""),
             }
         ]
-        # Cardio: no soreness adjustment
+        # Cardio: soreness is ignored
         return exercises
 
     # ----- NORMAL (RESISTANCE) WORKOUT FLOW -----
@@ -333,7 +370,7 @@ def main():
 
     # Load CSV – must live in same folder as app.py
     df = load_exercises("CS Workout Exercises Database CSV.csv")
-    all_muscles = sorted(df["Muscle Group"].unique())
+    muscles_in_db = sorted(df["Muscle Group"].unique())
 
     # If a workout is already generated, show flashcards or completion
     if "workout" in state and not state.get("finished", False):
@@ -372,7 +409,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # 🔹 Custom CSS so selected sore muscles show white text in green pills
+    # Custom CSS so selected sore muscles show white text in green pills
     st.markdown(
         f"""
         <style>
@@ -388,14 +425,18 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # 🔸 Limit soreness options to muscles relevant for the chosen workout type
-    relevant_muscles = infer_muscles_from_title(title, all_muscles)
+    # 🔸 Soreness options depend on workout type
+    soreness_options = get_soreness_options(title, muscles_in_db)
 
-    # Soreness now: ONLY select muscle groups that belong to this workout type
-    sore_groups = st.multiselect(
-        "Select sore muscle groups:",
-        options=relevant_muscles,
-    )
+    if not soreness_options:
+        # e.g. Cardio – no soreness options
+        st.caption("No sore muscle selection for this workout type.")
+        sore_groups = []
+    else:
+        sore_groups = st.multiselect(
+            "Select sore muscle groups:",
+            options=soreness_options,
+        )
 
     intensity = st.selectbox("Intensity:", ["Light", "Moderate", "Max effort"], 1)
 
