@@ -64,7 +64,17 @@ def infer_muscles_from_title(title, all_muscles):
         "push": ["Chest", "Shoulders", "Traps", "Triceps"],
         "pull": ["Lats", "Upper Back", "Lower Back", "Forearms", "Biceps"],
         "legs": ["Quads", "Hamstrings", "Calves", "Glutes", "Adductor"],
-        "upper": ["Chest", "Shoulders", "Traps", "Lats", "Upper Back", "Lower Back", "Forearms", "Biceps", "Triceps"],
+        "upper": [
+            "Chest",
+            "Shoulders",
+            "Traps",
+            "Lats",
+            "Upper Back",
+            "Lower Back",
+            "Forearms",
+            "Biceps",
+            "Triceps",
+        ],
         "lower": ["Quads", "Hamstrings", "Calves", "Glutes", "Adductor"],
         "arms": ["Biceps", "Triceps", "Forearms"],
         "chest": ["Chest"],
@@ -90,15 +100,12 @@ def infer_muscles_from_title(title, all_muscles):
 
 
 # ---------------------------------------------------
-# SORENESS OPTIONS PER WORKOUT TYPE (for UI)  ✅
+# SORENESS OPTIONS PER WORKOUT TYPE (for UI)
 # ---------------------------------------------------
 def get_soreness_options(title: str) -> list[str]:
     """
     Return the list of muscle groups that should be available
     as soreness options for the given workout type.
-
-    These are exactly as requested and we DO NOT filter by what is in the DB,
-    so you always see all of them in the dropdown.
     """
 
     push_groups = ["Chest", "Shoulders", "Traps", "Triceps"]
@@ -273,6 +280,8 @@ def show_flashcards():
     """
     Show one exercise at a time as a flashcard with
     Previous / Next navigation.
+    - No "Previous" button on the first exercise.
+    - "Next" button becomes "Complete workout" on the last exercise.
     """
     state = st.session_state
     exercises = state.workout
@@ -304,15 +313,16 @@ def show_flashcards():
     is_first = idx == 0
     is_last = idx == total - 1
 
-    # Navigation buttons: Previous (hidden on first), Next / Complete
     col_prev, col_next = st.columns(2)
 
+    # Only show "Previous" if this is NOT the first exercise
     with col_prev:
         if not is_first:
             if st.button("⬅️ Previous Exercise"):
                 state.current_card -= 1
                 st.rerun()
 
+    # On last exercise, label changes to "Complete workout ✅"
     with col_next:
         next_label = "Complete workout ✅" if is_last else "Next Exercise 👉"
         if st.button(next_label):
@@ -437,7 +447,7 @@ def main():
     else:
         sore_groups = st.multiselect(
             "Select sore muscle groups:",
-            options=sorenness_options,
+            options=soreness_options,
         )
 
     intensity = st.selectbox("Intensity:", ["Light", "Moderate", "Max effort"], 1)
