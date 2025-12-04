@@ -79,6 +79,7 @@ def infer_muscles_from_title(title, all_muscles):
     found = set()
     for key, muscles in mapping.items():
         if key in title:
+            # only keep muscles that actually exist in database
             found.update([m for m in muscles if m in all_muscles])
 
     if not found:
@@ -185,6 +186,7 @@ def build_workout_plan(df, title, minutes, sore_muscles, intensity):
                 "link": row.get("Link", ""),
             }
         ]
+        # Cardio: no soreness adjustment
         return exercises
 
     # ----- NORMAL (RESISTANCE) WORKOUT FLOW -----
@@ -331,7 +333,7 @@ def main():
 
     # Load CSV – must live in same folder as app.py
     df = load_exercises("CS Workout Exercises Database CSV.csv")
-    muscles = sorted(df["Muscle Group"].unique())
+    all_muscles = sorted(df["Muscle Group"].unique())
 
     # If a workout is already generated, show flashcards or completion
     if "workout" in state and not state.get("finished", False):
@@ -386,8 +388,14 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Soreness now: ONLY select muscle groups, no intensity sliders
-    sore_groups = st.multiselect("Select sore muscle groups:", muscles)
+    # 🔸 Limit soreness options to muscles relevant for the chosen workout type
+    relevant_muscles = infer_muscles_from_title(title, all_muscles)
+
+    # Soreness now: ONLY select muscle groups that belong to this workout type
+    sore_groups = st.multiselect(
+        "Select sore muscle groups:",
+        options=relevant_muscles,
+    )
 
     intensity = st.selectbox("Intensity:", ["Light", "Moderate", "Max effort"], 1)
 
