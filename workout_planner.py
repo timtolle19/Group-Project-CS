@@ -301,20 +301,25 @@ def show_flashcards():
         unsafe_allow_html=True,
     )
 
-    # Navigation buttons: Previous / Next
+    is_first = idx == 0
+    is_last = idx == total - 1
+
+    # Navigation buttons: Previous (hidden on first), Next / Complete
     col_prev, col_next = st.columns(2)
 
     with col_prev:
-        if st.button("⬅️ Previous Exercise"):
-            if state.current_card > 0:
+        if not is_first:
+            if st.button("⬅️ Previous Exercise"):
                 state.current_card -= 1
                 st.rerun()
 
     with col_next:
-        if st.button("Next Exercise 👉"):
-            state.current_card += 1
-            if state.current_card >= total:
+        next_label = "Complete workout ✅" if is_last else "Next Exercise 👉"
+        if st.button(next_label):
+            if is_last:
                 state.finished = True
+            else:
+                state.current_card += 1
             st.rerun()
 
 
@@ -432,7 +437,7 @@ def main():
     else:
         sore_groups = st.multiselect(
             "Select sore muscle groups:",
-            options=soreness_options,
+            options=sorenness_options,
         )
 
     intensity = st.selectbox("Intensity:", ["Light", "Moderate", "Max effort"], 1)
