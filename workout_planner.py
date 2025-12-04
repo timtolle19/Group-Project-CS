@@ -50,24 +50,25 @@ def load_exercises(csv_path: str):
 
 
 # ---------------------------------------------------
-# MUSCLE INFERENCE (still used for exercise selection)
+# MUSCLE INFERENCE (for exercise SELECTION, not soreness UI)
 # ---------------------------------------------------
 def infer_muscles_from_title(title, all_muscles):
     """
-    Infer which muscle groups to focus on from the workout title
-    (used for scoring exercises, not for soreness UI).
+    Infer which muscle groups to focus on from the workout title.
+    This influences which exercises get higher scores.
     """
     title = title.lower()
 
     mapping = {
-        "push": ["Chest", "Triceps", "Shoulders"],
-        "pull": ["Back", "Biceps"],
-        "legs": ["Legs", "Quads", "Hamstrings", "Glutes"],
-        "upper": ["Chest", "Shoulders", "Back", "Arms"],
-        "lower": ["Legs", "Quads", "Hamstrings", "Glutes"],
+        # Expanded to include some of your more detailed groups
+        "push": ["Chest", "Shoulders", "Traps", "Triceps"],
+        "pull": ["Lats", "Upper Back", "Lower Back", "Forearms", "Biceps"],
+        "legs": ["Quads", "Hamstrings", "Calves", "Glutes", "Adductor"],
+        "upper": ["Chest", "Shoulders", "Traps", "Lats", "Upper Back", "Lower Back", "Forearms", "Biceps", "Triceps"],
+        "lower": ["Quads", "Hamstrings", "Calves", "Glutes", "Adductor"],
         "arms": ["Biceps", "Triceps", "Forearms"],
         "chest": ["Chest"],
-        "back": ["Back"],
+        "back": ["Lats", "Upper Back", "Lower Back"],
         "shoulder": ["Shoulders"],
         "glute": ["Glutes"],
         "core": ["Abs", "Core"],
@@ -78,6 +79,7 @@ def infer_muscles_from_title(title, all_muscles):
     found = set()
     for key, muscles in mapping.items():
         if key in title:
+            # only keep muscles that actually exist in the DB (for scoring)
             found.update([m for m in muscles if m in all_muscles])
 
     if not found:
@@ -88,16 +90,17 @@ def infer_muscles_from_title(title, all_muscles):
 
 
 # ---------------------------------------------------
-# SORENESS OPTIONS PER WORKOUT TYPE (NEW)
+# SORENESS OPTIONS PER WORKOUT TYPE (for UI)  ✅
 # ---------------------------------------------------
-def get_soreness_options(title: str, all_muscles: list[str]) -> list[str]:
+def get_soreness_options(title: str) -> list[str]:
     """
     Return the list of muscle groups that should be available
     as soreness options for the given workout type.
-    Only muscles that actually exist in the database (all_muscles) are kept.
+
+    These are exactly as requested and we DO NOT filter by what is in the DB,
+    so you always see all of them in the dropdown.
     """
 
-    # Define base groups
     push_groups = ["Chest", "Shoulders", "Traps", "Triceps"]
     pull_groups = ["Lats", "Upper Back", "Lower Back", "Forearms", "Biceps"]
     leg_groups = ["Quads", "Hamstrings", "Calves", "Glutes", "Adductor"]
@@ -107,23 +110,24 @@ def get_soreness_options(title: str, all_muscles: list[str]) -> list[str]:
         "push day": push_groups,
         "pull day": pull_groups,
         "leg day": leg_groups,
-        "upper body": push_groups + pull_groups,
         "lower body": leg_groups,
+        "upper body": push_groups + pull_groups,
         "full body": push_groups + pull_groups + leg_groups + abs_groups,
-        "cardio": [],  # no soreness options for cardio
+        "cardio": [],  # no options for cardio
     }
 
     key = title.lower().strip()
     base = mapping.get(key, [])
 
-    if not base:
-        return []
+    # Deduplicate while keeping a stable order
+    seen = set()
+    result = []
+    for m in base:
+        if m not in seen:
+            seen.add(m)
+            result.append(m)
 
-    # Keep only muscles that exist in the database
-    all_set = set(all_muscles)
-    filtered = sorted({m for m in base if m in all_set})
-
-    return filtered
+    return result
 
 
 # ---------------------------------------------------
@@ -361,16 +365,11 @@ def show_completion():
 def main():
     """
     Render the workout builder inside the Trainer page.
-
-    app.py calls this inside show_trainer_page(), so we:
-    - DO NOT call st.set_page_config() here
-    - Just draw the trainer UI.
     """
     state = st.session_state
 
     # Load CSV – must live in same folder as app.py
     df = load_exercises("CS Workout Exercises Database CSV.csv")
-    muscles_in_db = sorted(df["Muscle Group"].unique())
 
     # If a workout is already generated, show flashcards or completion
     if "workout" in state and not state.get("finished", False):
@@ -385,7 +384,6 @@ def main():
     st.subheader("Build a workout with Pumpfessor Joe")
     st.caption("Answer a few questions and get a suggested workout plan.")
 
-    # Added "Cardio" as a workout type
     workout_options = [
         "Push Day",
         "Pull Day",
@@ -425,11 +423,10 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # 🔸 Soreness options depend on workout type
-    soreness_options = get_soreness_options(title, muscles_in_db)
+    # Soreness options depend on workout type (no filtering by DB now)
+    soreness_options = get_soreness_options(title)
 
     if not soreness_options:
-        # e.g. Cardio – no soreness options
         st.caption("No sore muscle selection for this workout type.")
         sore_groups = []
     else:
