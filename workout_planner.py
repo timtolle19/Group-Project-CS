@@ -152,6 +152,7 @@ def compute_num_exercises(minutes, intensity):
         return base
     # "Max effort"
     return min(12, int(base * 1.2))
+
 def score_exercise(row, targets):
     """
     Give each exercise a score based on:
@@ -166,6 +167,7 @@ def score_exercise(row, targets):
     # Add small random noise so the selection varies between runs
     score += random.uniform(-1, 1)
     return score
+
 def sets_reps_rest(intensity):
     """
     Return (sets, reps, rest) recommendations for a given workout intensity.
@@ -176,6 +178,7 @@ def sets_reps_rest(intensity):
         return 3, "8–12", "60–90 sec"
     # "Max effort"
     return 4, "6–10", "90–120 sec"
+
 def apply_soreness_adjustment(exercises, sore_muscles):
     """
     Adjust the workout based on sore muscle groups.
@@ -201,6 +204,7 @@ def apply_soreness_adjustment(exercises, sore_muscles):
         # Otherwise keep the exercise
         final_exercises.append(ex)
     return final_exercises
+
 def build_workout_plan(df, title, minutes, sore_muscles, intensity):
     """
     Build a structured workout plan given:
@@ -319,17 +323,17 @@ def show_flashcards():
     # Flags for first/last exercise to control button behavior
     is_first = idx == 0
     is_last = idx == total - 1
-    # Layout for navigation buttons: previous on the left, next/complete on the right
-    col_prev, col_next = st.columns(2)
+    # Layout for navigation buttons: previous on the far left, next/complete on the far right
+    col_prev, col_spacer, col_next = st.columns([1, 4, 1])
     # Left column: show "Previous Exercise" button only if we are not on the first exercise
     with col_prev:
         if not is_first:
-            if st.button("⬅️ Previous Exercise"):
+            if st.button("👈 Previous Exercise"):
                 state.current_card -= 1
                 st.rerun()  # rerun app to render new exercise
     # Right column: "Next Exercise" or "Complete workout" on the last card
     with col_next:
-        next_label = "Complete workout ✅" if is_last else "Next Exercise 👉"
+        next_label = "Complete workout 👉" if is_last else "Next Exercise 👉"
         if st.button(next_label):
             if is_last:
                 # Last exercise: mark workout as finished
