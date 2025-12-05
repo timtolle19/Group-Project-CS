@@ -323,8 +323,8 @@ def show_flashcards():
     # Flags for first/last exercise to control button behavior
     is_first = idx == 0
     is_last = idx == total - 1
-    # Layout for navigation buttons: previous on the far left, next/complete on the far right
-    col_prev, col_spacer, col_next = st.columns([1, 4, 1])
+    # Layout for navigation buttons: previous on the far left (wider), next/complete on the far right
+    col_prev, col_spacer, col_next = st.columns([4, 1, 2])
     # Left column: show "Previous Exercise" button only if we are not on the first exercise
     with col_prev:
         if not is_first:
