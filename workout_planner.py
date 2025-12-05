@@ -19,13 +19,16 @@ def load_exercises(csv_path: str):
     # - encoding="latin1" handles many special characters without crashing
     # - sep=None with engine="python" lets pandas auto-detect the separator
     df = pd.read_csv(csv_path, encoding="latin1", sep=None, engine="python")
+
     # Strip whitespace from column names (e.g. " Exercise " -> "Exercise")
     df.columns = [c.strip() for c in df.columns]
+
     # Strip whitespace from string values in every object column
     for col in df.columns:
         if df[col].dtype == "object":
             # Convert to string and remove leading/trailing spaces
             df[col] = df[col].astype(str).str.strip()
+
     # Map different possible column names to a unified schema used in the app
     rename = {}
     for c in df.columns:
@@ -42,13 +45,17 @@ def load_exercises(csv_path: str):
         # Any column starting with "link" becomes "Link"
         elif name.startswith("link"):
             rename[c] = "Link"
+
     # Actually rename the columns
     df = df.rename(columns=rename)
+
     # Drop rows where we are missing the exercise name OR muscle group
     df = df.dropna(subset=["Exercise", "Muscle Group"])
+
     # Some messy CSVs may contain the literal string "nan" instead of real NaN
     df = df[df["Exercise"].str.lower() != "nan"]
     df = df[df["Muscle Group"].str.lower() != "nan"]
+
     # Return the cleaned dataframe.
     # Because of @st.cache_data, Streamlit will cache this result so the CSV
     # is not re-read on every rerun.
@@ -64,6 +71,7 @@ def infer_muscles_from_title(title, all_muscles):
     """
     # Work with lowercase to make substring checks easier
     title = title.lower()
+
     # Mapping from keywords in the workout title -> muscle groups to prioritize
     mapping = {
         # Expanded to include more detailed muscle groups
@@ -91,12 +99,14 @@ def infer_muscles_from_title(title, all_muscles):
         "abs": ["Abs", "Core"],
         "cardio": ["Cardio"],  # in case there is a "Cardio" muscle group in the DB
     }
+
     # Collect all muscles whose keyword is contained in the title
     found = set()
     for key, muscles in mapping.items():
         if key in title:
             # Only keep muscles that actually exist in the database
             found.update([m for m in muscles if m in all_muscles])
+
     # If nothing is detected (e.g. custom name), just fall back to first 3 muscles
     if not found:
         return all_muscles[:3]
@@ -114,6 +124,7 @@ def get_soreness_options(title: str) -> list[str]:
     pull_groups = ["Lats", "Upper Back", "Lower Back", "Forearms", "Biceps"]
     leg_groups = ["Quads", "Hamstrings", "Calves", "Glutes", "Adductor"]
     abs_groups = ["Abs"]
+
     # For each workout title, specify which groups should be selectable
     mapping = {
         "push day": push_groups,
@@ -124,9 +135,11 @@ def get_soreness_options(title: str) -> list[str]:
         "full body": push_groups + pull_groups + leg_groups + abs_groups,
         "cardio": [],  # Cardio: no soreness options
     }
+
     # Normalize title for lookup
     key = title.lower().strip()
     base = mapping.get(key, [])
+
     # Remove duplicates while keeping the original order
     seen = set()
     result = []
@@ -134,6 +147,7 @@ def get_soreness_options(title: str) -> list[str]:
         if m not in seen:
             seen.add(m)
             result.append(m)
+
     return result
 
 # "AI" SCORING / WORKOUT LOGIC
@@ -144,6 +158,7 @@ def compute_num_exercises(minutes, intensity):
     """
     # Base count: about 1 exercise per ~8 minutes, clamped between 3 and 10
     base = max(3, min(10, round(minutes / 8)))
+
     # Adjust based on intensity: lighter workouts -> fewer exercises,
     # high intensity -> a bit more (but capped).
     if intensity == "Light":
@@ -161,9 +176,11 @@ def score_exercise(row, targets):
     """
     mg = row["Muscle Group"]  # muscle group of this row
     score = 0.0
+
     # Prefer exercises that hit target muscles
     if mg in targets:
         score += 6.0
+
     # Add small random noise so the selection varies between runs
     score += random.uniform(-1, 1)
     return score
@@ -189,20 +206,26 @@ def apply_soreness_adjustment(exercises, sore_muscles):
     # If nothing is sore, return the list unchanged
     if not sore_muscles:
         return exercises
+
     # Use a set for quick membership checks
     sore_muscles = set(sore_muscles)
+
     # Track for each sore muscle whether we've already removed an exercise
     removed_for = {m: False for m in sore_muscles}
     final_exercises = []
+
     for ex in exercises:
         mg = ex["muscle"]  # muscle group of this exercise
+
         # If this muscle is sore and we haven't removed one yet,
         # skip this exercise (i.e. remove it from the list)
         if mg in removed_for and not removed_for[mg]:
             removed_for[mg] = True
             continue
+
         # Otherwise keep the exercise
         final_exercises.append(ex)
+
     return final_exercises
 
 def build_workout_plan(df, title, minutes, sore_muscles, intensity):
@@ -219,16 +242,19 @@ def build_workout_plan(df, title, minutes, sore_muscles, intensity):
     - For other types: rank all relevant exercises, pick the top N,
       then apply soreness adjustment (remove 1 exercise per sore muscle).
     """
-    
+
     # Special handling for CARDIO WORKOUT
     if title.lower().strip() == "cardio":
         # Filter DB to only cardio exercises: any muscle group containing "cardio"
         df_cardio = df[df["Muscle Group"].str.contains("cardio", case=False, na=False)]
+
         # If the DB has no cardio entries, return an empty plan
         if df_cardio.empty:
             return []
+
         # Randomly pick ONE cardio exercise
         row = df_cardio.sample(1).iloc[0]
+
         # Build single-exercise workout where the "reps" is the total minutes
         exercises = [
             {
@@ -241,29 +267,36 @@ def build_workout_plan(df, title, minutes, sore_muscles, intensity):
                 "link": row.get("Link", ""),
             }
         ]
+
         # Cardio ignores soreness, so just return here
         return exercises
-    
+
     # NORMAL (RESISTANCE) WORKOUT FLOW
     # All available muscle groups in the DB
     all_muscles = sorted(df["Muscle Group"].unique())
+
     # Decide which muscles to focus on based on workout title
     targets = infer_muscles_from_title(title, all_muscles)
+
     # Safety: if for some reason DB is empty, return no workout
     if df.empty:
         return []
+
     # Work on a copy so we don't modify the original dataframe
     df = df.copy()
+
     # Compute a "score" for each exercise row based on targets + randomness
-    df["score"] = df.apply(
-        lambda r: score_exercise(r, targets), axis=1
-    )
+    df["score"] = df.apply(lambda r: score_exercise(r, targets), axis=1)
+
     # Highest scores first
     df = df.sort_values("score", ascending=False)
+
     # Decide how many exercises we want
     num = min(compute_num_exercises(minutes, intensity), len(df))
+
     # Get recommended sets, reps, and rest based on intensity
     sets, reps, rest = sets_reps_rest(intensity)
+
     # Build the list of exercise dicts that will be used by the UI
     exercises = []
     for _, r in df.head(num).iterrows():
@@ -278,6 +311,7 @@ def build_workout_plan(df, title, minutes, sore_muscles, intensity):
                 "link": r.get("Link", ""),
             }
         )
+
     # Apply soreness rule AFTER constructing the list:
     # one fewer exercise per sore muscle group
     exercises = apply_soreness_adjustment(exercises, sore_muscles)
@@ -298,10 +332,13 @@ def show_flashcards():
     idx = state.current_card           # index of current exercise
     total = len(exercises)             # total number of exercises
     ex = exercises[idx]                # current exercise dict
+
     # Header: show progress "Exercise X of Y"
     st.write(f"### Exercise {idx + 1} of {total}")
+
     # Progress bar: fraction of workout completed
     st.progress((idx + 1) / total)
+
     # Main flashcard with exercise info in styled HTML
     st.markdown(
         f"""
@@ -320,17 +357,24 @@ def show_flashcards():
 """,
         unsafe_allow_html=True,
     )
+
     # Flags for first/last exercise to control button behavior
     is_first = idx == 0
     is_last = idx == total - 1
-    # Layout for navigation buttons: previous on the far left (wider), next/complete on the far right
+
+    # Layout for navigation buttons: previous on the far left (wider),
+    # next/complete on the far right
     col_prev, col_spacer, col_next = st.columns([4, 1, 2])
+
     # Left column: show "Previous Exercise" button only if we are not on the first exercise
     with col_prev:
         if not is_first:
-            if st.button("👈 Previous Exercise"):
+            # Use non-breaking space so "Previous Exercise" stays on one line
+            prev_label = "👈 Previous\u00A0Exercise"
+            if st.button(prev_label):
                 state.current_card -= 1
                 st.rerun()  # rerun app to render new exercise
+
     # Right column: "Next Exercise" or "Complete workout" on the last card
     with col_next:
         next_label = "Complete workout 👉" if is_last else "Next Exercise 👉"
@@ -350,6 +394,7 @@ def show_completion():
     Uses st.session_state.workout to list all performed exercises.
     """
     state = st.session_state
+
     # Big title and congratulatory message
     st.markdown(
         f"<h2 style='color:{PRIMARY_COLOR};'>Workout Completed! 🎉</h2>",
@@ -357,6 +402,7 @@ def show_completion():
     )
     st.success("Joe the Pumpfessor is proud of you! 💪🔥")
     st.write("### Your full workout summary:")
+
     # Summary card for each exercise in the workout
     for ex in state.workout:
         st.markdown(
@@ -374,6 +420,7 @@ def show_completion():
 """,
             unsafe_allow_html=True,
         )
+
     # Button to go back to the workout builder and reset workout-related state
     if st.button("Back to workout builder ↩️"):
         for key in ["workout", "current_card", "finished"]:
@@ -391,19 +438,24 @@ def main():
     - Otherwise render the workout builder form.
     """
     state = st.session_state
+
     # Load CSV – must live in same folder as app.py
     df = load_exercises("CS Workout Exercises Database CSV.csv")
+
     # If a workout is already generated and not finished, show flashcards
     if "workout" in state and not state.get("finished", False):
         show_flashcards()
         return
+
     # If workout is marked as finished, show completion summary
     if state.get("finished", False):
         show_completion()
         return
+
     # ----- Workout builder form (initial view) -----
     st.subheader("Build a workout with Pumpfessor Joe")
     st.caption("Answer a few questions and get a suggested workout plan.")
+
     # Main workout type selector
     workout_options = [
         "Push Day",
@@ -415,17 +467,21 @@ def main():
         "Cardio",
     ]
     title = st.selectbox("Choose your workout type:", workout_options, index=0)
+
     # Slider for time available
     minutes = st.slider("How many minutes do you have?", 15, 120, 45, 5)
+
     # Store current workout meta info for other parts of the app (e.g. calorie tracker)
     st.session_state["current_workout"] = {
         "title": title,
         "minutes": minutes,
     }
+
     st.markdown(
         f"<p style='color:{PRIMARY_COLOR};'><b>Are you sore anywhere?</b></p>",
         unsafe_allow_html=True,
     )
+
     # CSS override so selected multiselect tags appear in green with white text
     st.markdown(
         f"""
@@ -441,8 +497,10 @@ def main():
         """,
         unsafe_allow_html=True,
     )
+
     # Determine soreness options based on selected workout type
     soreness_options = get_soreness_options(title)
+
     # Multiselect only if there are options for this workout type
     if not soreness_options:
         st.caption("No sore muscle selection for this workout type.")
@@ -452,8 +510,10 @@ def main():
             "Select sore muscle groups:",
             options=soreness_options,
         )
+
     # Training intensity
     intensity = st.selectbox("Intensity:", ["Light", "Moderate", "Max effort"], 1)
+
     # Button to generate the workout
     if st.button("Generate Workout"):
         # Build the workout plan based on the chosen parameters
